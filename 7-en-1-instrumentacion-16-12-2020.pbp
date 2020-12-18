@@ -1,0 +1,638 @@
+'*  Name    : UNTITLED.BAS                                      *
+'*  Author  : [select VIEW...EDITOR OPTIONS]                    *
+'*  Notice  : Copyright (c) 2020 [select VIEW...EDITOR OPTIONS] *
+'*          : All Rights Reserved                               *
+'*  Date    : 12/9/2020                                         *
+'*  Version : 1.0                                               *
+'*  Notes   :                                                   *
+'*          :                                                   *
+'****************************************************************
+; INSTRUMENTACION Ago-Dic-2020
+; Prof. R.Jimenez, Residente: Lee Alvarez
+; 3 Practicas en 1 PIC 16F1619
+; Medicion de FLujo, Gasto, y Nivel de Liquido
+; Version Nov-20
+; 6 en 1 instrumentacion
+on interrupt goto SEL; IF THERE INTERRUPT GO TO LABEL SEL
+  #CONFIG; FUSSES 
+    __config _CONFIG1,  _FOSC_INTOSC & _PWRTE_ON & _MCLRE_OFF & _CP_OFF & _BOREN_ON & _CLKOUTEN_OFF
+    __config _CONFIG2,  _WRT_OFF & _PPS1WAY_OFF & _ZCD_OFF & _PLLEN_OFF & _STVREN_ON & _BORV_LO & _LVP_OFF
+    __config _CONFIG3,  _WDTCPS_WDTCPS4 & _WDTE_ON & _WDTCWS_WDTCWS100 & _WDTCCS_LFINTOSC
+  #ENDCONFIG
+;CONFIGURATION OF THE INTERNAL CLOCK
+OSCCON = %01101010; $6A, INTERN CLOCK AT 4MHZ
+OSCSTAT = %00011111; $1F, INTERNAL CLOCK ENABLE
+OSCTUNE = 0;INTERNAL OSC WORKS AT THE CALIBRATED FREQUENCY    
+; PINS CONFIGURATION
+;--PORTA--
+TRISA = %00111100; RA3:RA4:RA5 AS INPUT 
+ANSELA = %00000100; ALL PINS ARE DIGITAL
+OPTION_REG.7=0; PULL-UPS ENABLED
+WPUA = %00011000; RA2:RA4 ENABLED PULL UPS
+;LATA = 0
+;--PORTB--
+TRISB = %11110000; RB4:RA5:RB6 AS INPUT
+ANSELB = 0; ALL PINS ARE DIGITAL
+WPUB = %11110000; RB4:RA5:RB6 ENABLED PULL UPS
+LATB = 0
+;--PORTC--
+TRISC = %11100000; RA5:RA6:RA7 AS INPUT
+ANSELC = %10000000; RA6:RA7 ARE ANALOG
+WPUC = %01100000; PULL UPS DISABLED
+LATC = 0;
+;---
+PORTA = 0;
+PORTB = 0;
+PORTC =0;
+;INTERRUPT CONFIGURATION
+
+INTCON = %11001000;ENABLE INTERRUPT
+IOCAN = %001000; RA3 INTERRUPT
+
+;TIMER-------------------------------------
+T1CON = %10000100;ENABLE TIMER 1, T1CKL
+;--LCD CONFIGURATION ----------------------
+DEFINE LCD_DREG PORTC ' PORTC is LCD data port
+DEFINE LCD_DBIT 0 ' PORTC.0 is the data LSB
+DEFINE LCD_RSREG PORTA ' RS is connected to PORTA.0
+DEFINE LCD_RSBIT 0
+DEFINE LCD_EREG PORTA ' E is connected to PORTA.1
+DEFINE LCD_EBIT 1
+DEFINE LCD_BITS 4 ' 4  data line         
+DEFINE LCD_LINES 2 '  2-line display
+DEFINE LCD_COMMANDUS 1500 ' Use 1500uS command delay
+DEFINE LCD_DATAUS 44 ' Use 44uS data delay
+;;-----------------------------------------------------
+
+ADCON0 = %00001101;ADC ENABLED
+ADCON1 = %10000000; RIGHT JUSTIFIED
+;----TIMER 3 SET-UP-----------------------
+T3CON = %11110101;  TURN ON TIMER 3, LFINTOSC, INPUT, 31kHz, prescale 8
+;-----------------------------------------
+;---------------------------------
+;CONFIGURATION OF THE SERIAL PORT
+TX1STA = %00100000;$20, ENABLE TRANSMISSION, 8 BITS, LOW VELOCITY
+BAUD1CON = %00000000; NO INVERTER, DETECTION OF THE FALLING EDGE
+SPBRGL = 25; CALCULATED OF 2400 BPS
+RB7PPS = %10010; ACTIVATING PPS MODULE
+RC1STA = %10010000; ENABLED SERIAL PORT
+RXPPS = %01101
+DEFINE HSER_CLROERR 1; CLEAR OVERRUN ERROR 
+
+
+
+;VARIABLES
+C var byte;
+PULSOS VAR WORD
+FD VAR BYTE[5];
+LD VAR BYTE[4];
+LITER VAR WORD
+IN VAR BYTE
+IN2 VAR BYTE
+OUT VAR BYTE
+OUT2 VAR BYTE
+MUESTRAS VAR BYTE;
+X VAR BYTE;
+ADC VAR WORD;
+K VAR WORD;
+REMAINDER VAR WORD
+VIN VAR WORD
+CH VAR BYTE;
+SEG VAR WORD;
+VD VAR BYTE[4]
+KD VAR BYTE[4]
+STATE VAR BIT
+T VAR BYTE[4]
+TIME VAR WORD
+TMR VAR WORD;
+FLU VAR WORD
+A VAR BYTE 
+DIF VAR WORD
+DAT var word;
+DIR VAR WORD;
+ANT VAR WORD
+Counter var word;
+RV var byte;
+RD Var word
+TR VAR WORD
+CLEAR
+;ALIAS ---
+PB1 VAR PORTC.5
+LITERS var PORTB.6;
+MILILITERS var PORTB.7;
+SERVE var PORTC.6;
+
+READCODE $1FF5,STATE; READ THE CONTROL VARIABLE
+
+IF STATE = 0  THEN
+    READCODE $1FF6,K; READ THE CONSTANT
+    READCODE $1FF7,C; READ THE PRACTIQUE
+ELSE
+    K = 100;
+    C=  0;
+    DIR = $1FF5;
+    DAT = 5;
+    GOSUB ERASE
+    GOSUB SAVE 
+ENDIF  
+
+LCDOUT $FE,$80,"Instrum "
+LCDOUT $FE,$C0,"Jimenez "
+pause 1500
+LCDOUT $FE,$80,"G. Lee "
+LCDOUT $FE,$C0,"A. Chavez"
+pause 1500
+LCDOUT $FE,$80,"ITM(c)  "
+LCDOUT $FE,$C0,"12/16/20 "
+pause 1500
+LCDOUT $FE,$80,"PUSH THE"
+LCDOUT $FE,$C0," BUTTON "
+;pause 1500
+
+START:      ; SELECT THE PRACTICE TO USE
+
+SELECT CASE C
+    CASE 1
+        GOTO PRACTICE_1
+    CASE 2
+        GOTO PRACTICE_2
+    CASE 3
+        GOTO PRACTICE_3
+    CASE 4 
+        GOTO PRACTICE_4
+    CASE 5
+        GOTO PRACTICE_5
+    CASE 6
+        GOTO PRACTICE_6
+    CASE 7
+        GOTO PRACTICE_7
+    END SELECT
+GOTO START
+
+
+DISABLE; DISABLE INTERRUPT
+
+SEL:  ;PRACTICE SELECTION
+    c=c+1;
+    IF C >7 THEN C = 1;  THE MAX PRACTICES IS 6 IN THIS CASE
+    PAUSE 200
+    IOCAF.3 = 0; CLEAR FLAG
+
+resume
+
+ENABLE; ENABLE INTERRUPT
+
+             
+;-------------------------------------------------------------------------------             
+PRACTICE_1:
+    GOSUB SEQUENCE;
+    lcdout $FE,$80,"                "; Required Volume
+    lcdout $fe,$80,"PRACTICE"    ; MESSAGES 
+    lcdout $fe,$c0,"-- 1 ---"
+    PAUSE 1000
+    lcdout $fe,$80,"VOLT    "
+    lcdout $fe,$c0,"--------"
+    PAUSE 1000;
+  
+
+HERE1:
+        CH = 9;CHANNEL 9
+        GOSUB ADC_READ; GO TO SEQUENCE 
+        LCDOUT $FE,$C0,"V=",DEC VD[3],".",DEC VD[2],DEC VD[1],DEC VD[0]," "
+        IF C<>1 THEN START; IF DIFFERENT RPACTICE
+GOTO HERE1;        
+         
+;-------------------------------------------------------------------------------
+PRACTICE_2:
+    GOSUB SEQUENCE;
+    lcdout $fe,$80,"PRACTICE"
+    lcdout $fe,$c0,"-- 2 ---"
+    PAUSE 1000
+    lcdout $fe,$80,"TEMP    "
+    lcdout $fe,$c0,"LM34    "
+    PAUSE 1000
+
+    HERE2:
+        CH = 8;CHANNEL 8
+        GOSUB ADC_READ;GO TO SEQUENCE
+        lcdout $FE,$C0,"F=",dec vD[2],dec vD[1],".",DEC VD[0],"  "
+        IF C <> 2 THEN START; IF DIFFERENT RPACTICE
+    GOTO HERE2
+;-------------------------------------------------------------------------------
+PRACTICE_3:
+    GOSUB SEQUENCE;      
+    lcdout $fe,$80,"PRACTICE"
+    lcdout $fe,$c0,"-- 3 ---"
+    PAUSE 1000
+    lcdout $fe,$80,"COUNTER "
+    lcdout $fe,$c0,"FLOW    "
+    PAUSE 1000
+    lcdout $fe,$80,"PULSES X"
+    lcdout $fe,$c0,"1 LITRE "
+    PAUSE 1000;
+
+    HERE_31:
+        LCDOUT $FE,$80,"PULSES  ";
+        TMR1L = 0; 
+        TMR1H = 0;
+
+    HERE3:
+        
+        T1CON.0 = 1 
+        if SERVE = 0 then PORTC.4 = 1;
+        TMR.BYTE0 = TMR1L; LOW REGISTER
+        TMR.BYTE1 = TMR1H; HIGH REGISTER
+        LCDOUT $FE,$C0,DEC TMR,"       "
+        IF PB1 = 0 THEN 
+                DISABLE
+                T1CON.0 = 0
+                PORTC.4 = 0
+                K = TMR/10; OBTAIN THE CONSTANT, EXAMPLE 800 PULSES IN THOUSAND MILLILITER, 800/1000 =0.8
+                          ; BE MULTIPLYING BY 100 FOR THE DECIMALS ;   100/1000 = 1/10
+                FOR X = 0 TO 2
+                    KD[X]= K DIG X;
+                NEXT X
+        LCDOUT $FE,$80,"CONSTANT"  
+        LCDOUT $FE,$C0,"N=",DEC KD[2],".",DEC KD[1],DEC KD[0],"      ";P/ML
+        PAUSE 3000
+        TMR1L = 0;
+        TMR1H = 0;
+        gosub SEQUENCE  
+        ENABLE
+        GOTO HERE_31;
+    ENDIF
+
+IF C <> 3 THEN 
+    PORTC.4 = 0
+    goto START;IF DIFFERENT RPACTICE
+    ENDIF
+GOTO HERE3   
+
+;-------------------------------------------------------------------------------    
+PRACTICE_4:
+    TMR3L = 0;
+    TMR3H = 0;CLEAR TIMER 3
+    SEG = 0;
+    
+    GOSUB SEQUENCE;
+    lcdout $fe,$80,"PRACTICE"
+    lcdout $fe,$c0,"-- 4 ---"
+    PAUSE 1000
+    lcdout $fe,$80,"LIQUID  "
+    lcdout $fe,$c0,"CONTROL "
+    PAUSE 1000    
+    
+    TMR1L = 0; 
+    TMR1H = 0;
+    HERE4:
+        IF PB1 = 0 THEN
+            flu = 0;
+            liter = 0
+            TMR1L = 0
+            TMR1H = 0;
+            ANT=0
+            DIF = 0
+        ENDIF
+        T1CON.0 = 1
+        TMR.BYTE0 = TMR1L; LOW REGISTER
+        TMR.BYTE1 = TMR1H; HIGH REGISTER
+        ANT= TMR;
+        PAUSE 1000
+        TMR.BYTE0 = TMR1L; LOW REGISTER
+        TMR.BYTE1 = TMR1H; HIGH REGISTER
+        DIF= TMR-ANT;           OBTAIN THE DIFFERENCE OF PULSES
+        REMAINDER= TMR*100; 
+        LITER = DIV32 K;        DIVIDE BY THE CONSTANT
+        REMAINDER = DIF*100
+        FLU = DIV32 K;          DIVIDE BY THE CONSTANT
+        
+        FOR X = 0 TO 4
+            FD[X] = FLU DIG X
+            LD[X] = LITER DIG X
+        NEXT X
+    TIME.BYTE0 = TMR3L;
+    TIME.BYTE1 = TMR3H;
+    
+    LCDOUT $FE,$80,DEC LD[4],DEC LD[3],".",DEC LD[2],DEC LD[1],DEC LD[0],"L "
+    IF (MUESTRAS =< 3) THEN
+        LCDOUT $FE,$C0,DEC FD[2],DEC FD[1],DEC FD[0],"mL/S   " 
+    ELSE 
+        ch = 9;
+        gosub ADC_READ;
+        IF (MUESTRAS > 5) THEN MUESTRAS = 0;
+        LCDOUT $FE,$C0,"%=",DEC VD[3],DEC VD[2],DEC VD[1],".",DEC VD[0],"  "
+    ENDIF
+    MUESTRAS = MUESTRAS + 1;
+
+
+    
+        IF PB1 = 0 THEN
+            flu = 0;
+            liter = 0
+            TMR1L = 0
+            TMR1H = 0;
+            ANT=0
+            DIF = 0
+        ENDIF
+IF C <> 4 THEN START; IF DIFFERENT RPACTICE
+
+GOTO HERE4
+             
+;-------------------------------------------------------------------------------             
+PRACTICE_5:
+    GOSUB SEQUENCE;
+    lcdout $fe,$80,"PRACTICE"
+    lcdout $fe,$c0,"-- 5 ---"
+    PAUSE 1000
+HERE5: 
+    lcdout $fe,$80,"TX VOLT "
+    lcdout $fe,$c0,"& TEMP  "
+    PAUSE 1000    
+
+MAIN5:
+IF PB1 = 0 THEN;START THE QUESTION FOR THE BUTTON
+    PAUSE 150
+    A = 0;CONTROL VARIABLE IS 0
+    GOSUB SEND
+ENDIF; END OF THE QUESTION
+IF C <> 5 THEN START; IF DIFFERENT RPACTICE
+IF A = 0 THEN; START THE QUESTION FOR THE VARIABLE OF CONTROL
+   LCDOUT $FE,$80,"START---";
+   LCDOUT $FE,$C0,"TX------";
+   PAUSE 1000;
+   
+   STAY5:; LABEL STAY
+        
+        CH = 8;CHANNEL 8
+        GOSUB ADC_READ;GO TO SEQUENCE
+        FOR X = 0 TO 3
+              T[X]=VD[X]
+        NEXT X
+        
+        CH = 9
+        GOSUB ADC_READ; GO TO THE LABEL ADC AND RETURN;
+        lcdout $FE,$80,"V=",DEC VD[3],".",DEC VD[2],DEC VD[1],DEC VD[0],"     "
+               
+        lcdout $FE,$C0,"F=",dec T[3],dec T[2],dec T[1],".",DEC T[0],"     "
+
+        
+        GOSUB SEND;GO TO THE LABEL SEND AND RETURN
+        
+        if pb1 = 0 then;START THE QUESTION FOR THE BUTTON 
+                A = 1; VARIABLE OF CONTROL IS 1, END THE TRANSMISSION
+                PAUSE 200;
+        ENDIF; END OF THE QUESTION
+        IF C <> 5 THEN START; IF DIFFERENT RPACTICE
+    IF A = 0 THEN STAY5; IS CONTROL IS "0" GO TO THE LABEL STAY
+    
+    A = 1;; VARIABLE OF CONTROL IS "1"
+    IF C <> 5 THEN START; IF DIFFERENT RPACTICE
+    GOSUB SEND
+    ;NEXT X
+    LCDOUT $FE,$80,"END-----";
+    LCDOUT $FE,$C0,"TX------";
+    PAUSE 1000   
+    GOTO HERE5
+    
+ENDIF
+
+
+
+GOTO MAIN5
+;-------------------------
+PRACTICE_6:
+    GOSUB SEQUENCE;
+    lcdout $fe,$80,"PRACTICE"
+    lcdout $fe,$c0,"-- 6 ---"
+    PAUSE 1000
+
+    lcdout $fe,$80,"RX VOLT "
+    lcdout $fe,$c0,"& TEMP  "
+    PAUSE 1000            
+    ;CH = 8;
+    A = 1;
+HERE6: 
+LCDOUT $FE,$80,"WAITING-";
+LCDOUT $FE,$C0,"SIGNAL--";
+
+MAIN6:;LABEL MAIN1
+IF C <> 6 THEN START; IF DIFFERENT RPACTICE
+HSERIN 1000,MAIN6,[WAIT("ZZ"), STR A\1];WAIT 1 SECOND TO RECEIVE THE INSTRUCTION
+
+IF  A = "0" THEN;IF A IS EQUAL TO DIGIT "0" CONTINUE
+    LCDOUT $FE,$80,"START---";
+    LCDOUT $FE,$C0,"RX------";
+    PAUSE 1000
+    HERE_6:; LABEL HERE
+    HERE_6A:
+    IF C <> 6 THEN START; IF DIFFERENT RPACTICE
+    HSERIN 100,HERE_6A,[WAIT("VA"),STR VD\4];WAIT THE INSTRUCTION "VA" AND SAVE THE DATA
+    HERE_6B:
+    IF C <> 6 THEN START; IF DIFFERENT RPACTICE
+    HSERIN 10,HERE_6B,[WAIT("TB"),STR T\4];WAIT THE INSTRUCTION "TB" AND SAVE THE DATA
+    
+    LCDOUT $FE,$80,"V=",VD[0],".",VD[1],VD[2],VD[3],"           ";
+    LCDOUT $FE,$C0,"F=",T[0],T[1],T[2],".",T[3],"           ";
+    HSERIN 10,HERE_6, [WAIT("ZZ"),STR A\1];WAIT THE INSTRUCTION "ZZ" AND SAVE THE DATA
+    IF C <> 6 THEN START; IF DIFFERENT RPACTICE
+    if A <> "1" then HERE_6; IF A IS DIFERENT TO "1" THEN HERE
+ENDIF
+    LCDOUT $FE,$80,"END-----";
+    LCDOUT $FE,$C0,"RX------";
+    PAUSE 1000
+GOTO HERE6
+;-------------------------------------------------------------------------------  
+PRACTICE_7:
+
+    LITERS = 0;
+    MILILITERS = 0;
+    COUNTER = 0; 
+    TMR3L = 0;
+    TMR3H = 0;
+    SEG = 0; 
+    TMR = 0   
+    TMR1L = 0;
+    LD =0 
+    TMR1H = 0;   Clear all
+    lcdout $FE,$01; Clear LCD
+    lcdout $fe,$80,"PRACTICE"
+    lcdout $fe,$c0,"-- 7 ---"
+    PAUSE 1000
+    lcdout $fe,$80,"PROGRAMMABLE"
+    lcdout $fe,$c0,"DISPENSER"
+    PAUSE 1000
+
+SetVolume:
+
+    lcdout $FE,$80,"Required Volume"; Required Volume
+    pause 100
+    LCDOUT $FE,$C0,DEC COUNTER,"mL       "
+    Pause 100
+    IF C <> 7 THEN GOTO START  
+    if LITERS = 0 then
+        PAUSE 200
+        COUNTER = COUNTER + 1000;    Add 1 liter
+    endif
+    if MILILITERS = 0 then
+        pause 200
+        COUNTER = COUNTER + 1;   Add 1 ml
+    endif
+    if SERVE = 0 THEN
+        lcdout $FE,$01; Clear LCD
+        goto HERE7
+    endif 
+    goto SetVolume; 
+
+    HERE7:
+        IF PB1 = 0 THEN
+            TMR = 0
+            flu = 0;
+            liter = 0
+            TMR1L = 0
+            TMR1H = 0;
+            ANT=0
+            DIF = 0
+        ENDIF
+        T1CON.0 = 1
+        PORTC.4 = 1;  Set on the Valve
+        TMR.BYTE0 = TMR1L; LOW REGISTER
+        TMR.BYTE1 = TMR1H; HIGH REGISTER
+        ANT= TMR;
+        PAUSE 1000
+        TMR.BYTE0 = TMR1L; LOW REGISTER
+        TMR.BYTE1 = TMR1H; HIGH REGISTER
+        DIF= TMR-ANT;           OBTAIN THE DIFFERENCE OF PULSES
+        REMAINDER= TMR*100; 
+        LITER = DIV32 K;        DIVIDE BY THE CONSTANT
+        if LITER >= Counter then
+            PORTC.4 = 0; 
+            FOR X = 0 TO 4
+                LD[X] = COUNTER DIG X
+            NEXT X
+            LCDOUT $FE,$80,DEC LD[4],DEC LD[3],".",DEC LD[2],DEC LD[1],DEC LD[0],"L "
+            pause 2000
+            goto PRACTICE_7
+        endif
+        REMAINDER = DIF*100
+        FLU = DIV32 K;          DIVIDE BY THE CONSTANT
+        FOR X = 0 TO 4
+            FD[X] = FLU DIG X
+            LD[X] = LITER DIG X
+        NEXT X
+    TIME.BYTE0 = TMR3L;
+    TIME.BYTE1 = TMR3H;
+    
+    LCDOUT $FE,$80,DEC LD[4],DEC LD[3],".",DEC LD[2],DEC LD[1],DEC LD[0],"L "
+    pause 200
+    IF (MUESTRAS =< 3) THEN
+        LCDOUT $FE,$C0,DEC FD[2],DEC FD[1],DEC FD[0],"mL/S   " 
+    ELSE 
+        ch = 9;
+        gosub ADC_READ;
+        IF (MUESTRAS > 5) THEN MUESTRAS = 0;
+        LCDOUT $FE,$C0,"%=",DEC VD[3],DEC VD[2],DEC VD[1],".",DEC VD[0],"  "
+        pause 200
+    ENDIF
+    MUESTRAS = MUESTRAS + 1;
+    
+        IF PB1 = 0 THEN
+            flu = 0;
+            liter = 0
+            TMR1L = 0
+            TMR1H = 0;
+            ANT=0
+            DIF = 0
+        ENDIF
+        
+
+        
+    IF C <> 7 THEN 
+        PORTC.4 = 0
+        goto START; IF DIFFERENT RPACTICE
+        ENDIF
+goto HERE7     
+;-----------------------------
+ADC_READ:
+    CH = CH<<2;
+    ADCON0 = CH^%10000001; BITWISE XNOR
+    PAUSE 1
+    ADCON0.1 = 1;   
+    HERE_ADC: IF ADCON0.1 = 1 THEN HERE_ADC; STAY HERE WHILE CONVERSION IS ready
+    ADCON0.0 = 0;
+    ADC.BYTE0 = ADRESL;     SAVE LOWER REGISTER OF THE ADC IN VARIABLE VIN
+    ADC.BYTE1 = ADRESH;     SAVE HIGHER REGISTER OF THE ADC IN VARIABLE VIN
+    DISABLE
+    REMAINDER = ADC*4887;              MULTIPLYING BY RESLSB = 4.8887
+    VIN = div32 1000;              PERFORM 16-BITS DIVISION 
+    ENABLE 
+    FOR X = 0 TO 3
+        VD[X] = VIN DIG X
+    NEXT X 
+return
+;-------------------------------------------------------------------------------
+UNLOCK:             ; UNLOCK SEQUENCE
+    ASM 
+        BANKSEL PMCON2
+        MOVLW 0x55
+        MOVWF PMCON2 & 0x7F
+        MOVLW 0xAA
+        MOVWF PMCON2 & 0x7F
+        BSF PMCON1 & 0x7F,1 ; set WR bit
+        NOP
+        NOP
+    ENDASM
+RETURN
+;-------------------------------------------------------------------------------
+ERASE:                ;required sequence                                                  
+    PMCON1.4 = 1;
+    PMCON1.2 = 1;
+    GOSUB UNLOCK;
+    PMCON1.2=0;
+    PMCON1.4=0;
+RETURN
+;-------------------------------------------------------------------------------
+SEQUENCE:         ;data save sequence
+    GOSUB ERASE
+    DIR = $1FF5
+    DAT = 0;
+    GOSUB SAVE
+    DIR =$1FF6;
+    DAT = K;
+    GOSUB SAVE;
+    DIR =$1FF7
+    DAT = C
+    GOSUB SAVE 
+RETURN
+;-------------------------------------------------------------------------------
+SAVE:                 ;instruccion set
+    PMADRL = DIR.BYTE0;
+    PMADRH = DIR.BYTE1;
+    PMDATL= DAT.BYTE0;
+    PMDATH= DAT.BYTE1;
+    PMCON1 =%00000110
+    GOSUB UNLOCK;
+    STAY:IF (PMCON1.1 = 1) AND (PMCON1.3 = 1)THEN STAY;
+    IF PMCON1.3 = 1 THEN save;
+    PMCON1=%00000000
+RETURN;
+SEND:; LABEL SEND;
+    for x = 0 to 3
+          in = vd[x]
+          IN2 =T[X]
+          lookup IN,["0123456789"],out
+          LOOKUP IN2,["0123456789"],OUT2
+          VD[X]=OUT
+          T[X] = OUT2
+    next x
+
+    FOR X = 0 TO 1
+        HSEROUT ["VA", VD[3], VD[2], VD[1],VD[0],10]; SEND DATA BY WAY OF SERIAL
+        HSEROUT ["TB", T[3],T[2],T[1],T[0],10]
+        HSEROUT ["ZZ",DEC A,10]
+    NEXT X
+    
+RETURN; GO TO THE IS CALLING
+
+
+
+
