@@ -1,4 +1,4 @@
-'*  Name    : UNTITLED.BAS                                      *
+'*  Name    : 3 Practicas en 1 PIC 16F1619                      *
 '*  Author  : [select VIEW...EDITOR OPTIONS]                    *
 '*  Notice  : Copyright (c) 2020 [select VIEW...EDITOR OPTIONS] *
 '*          : All Rights Reserved                               *
@@ -8,11 +8,11 @@
 '*          :                                                   *
 '****************************************************************
 ; INSTRUMENTACION Ago-Dic-2020
-; Prof. R.Jimenez, Residente: Lee Alvarez
+; M. R.Jimenez, Residente: Lee Alvarez, Prestante Servicio: Arturo Chavez
 ; 3 Practicas en 1 PIC 16F1619
 ; Medicion de FLujo, Gasto, y Nivel de Liquido
 ; Version Nov-20
-; 6 en 1 instrumentacion
+; 7 en 1 instrumentacion
 on interrupt goto SEL; IF THERE INTERRUPT GO TO LABEL SEL
   #CONFIG; FUSSES 
     __config _CONFIG1,  _FOSC_INTOSC & _PWRTE_ON & _MCLRE_OFF & _CP_OFF & _BOREN_ON & _CLKOUTEN_OFF
